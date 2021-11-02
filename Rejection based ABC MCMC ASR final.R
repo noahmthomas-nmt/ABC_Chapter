@@ -1,4 +1,4 @@
-# PMC based ABC ASR.R
+# Rejection base ABC MCMC ASR.R
 
 rm(list = ls()) # Clear environment
 
@@ -15,18 +15,14 @@ source("ABC_functions.R") # functions to run ABC
 source("limits.r") # for plotting
 
 # --------------------------------------------------------- Algorithm Parameters
-num_posts <- 1000 # number of posterior draws
-num_particles <- 100 # number of particles in population
-# array for posterior draws
-theta <- array(NA, 
-               dim = c(length(param_names), 
-                       num_particles, 
-                       num_posts)) 
-rownames(theta) <- param_names 
-log_weight <- matrix(NA, num_particles, num_posts) # array for log weights
-eps <- seq(100, 25, length.out = num_posts) # vector of acceptable differences
-# vector for variation of the population
-sigma2_vec <- matrix(NA, length(param_names), num_posts) 
+num_posts <- 1000000 # number posterior draws
+# create array for theta
+theta <- array(NA, dim = c(length(param_names), num_posts)) 
+rownames(theta) <- param_names
+
+log_weight <- matrix(NA, num_posts) # create matrix for log_weights
+eps <- 65 # determine maximum difference between simulated and observed data
+sigma_proposal <- start_sds / 5 # determine sd or proposal distribution
 
 # ---------------------------------------------------- Experiment Parameters
 
@@ -53,80 +49,65 @@ Data <- data_list
 
 
 # ------------------------------------------------------------- Initialization
-for(part_i in 1:num_particles){
-  d <- Inf
-  while(d > eps[1]){
-    print(d)
-    theta_star <- sample_prior() # sample from prior
-    # check that the parameters have density under the prior
-    if(is.finite(dens_prior(theta_star, LOG = T)) & 
-       dens_prior(theta_star, LOG = F) > 0){
-      # get the difference between simulated and observed data
-      d <- get_d(params = theta_star, data = Data) 
-    }
+d <- Inf
+while(d >= eps){
+  theta_star <- sample_prior() # sample from prior
+  print(d)
+  if(is.finite(dens_prior(theta_star, LOG = T))){
+    # get difference between observed and similar data
+    d <- get_d(params = theta_star, data = Data[[1]]) 
   }
-  print(part_i)
-  theta[, part_i, 1] <- theta_star # store result
 }
-
-log_weight[, 1] <- log(1/num_particles) # initialize log weights
-# calulate variation of the population
-sigma2_vec[, 1] <- 2 * apply(theta[,, 1], 1, var) 
+# store the first accepted proposal
+theta[, 1] <- theta_star
 
 # ------------------------------------------------------------- Sample
-I <- 3 # initialize I
-for(i in (I - 1):num_posts){
-  print(i)
-  for(part_i in 1:num_particles){
-    d <- Inf
-    while(d > eps[i]){ # while d is greater that acceptable difference
-      # sample particles based on fitness
-      theta_star_ind <-  sample(1:num_particles, 
-                                1, 
-                                prob = exp(log_weight[, i-1]) + exp(-740)) 
-      theta_star <- theta[, theta_star_ind, i-1] # get particle that was sampled
-      # generate proposal around that particle
-      theta_ss <- rproposal(theta_star, sigma2_vec[, i-1]) 
-      # check that the parameters have density under the prior
-      if(is.finite(dens_prior(theta_ss, LOG = T)) & 
-         dens_prior(theta_ss, LOG = F) > 0 ){
-        # get the difference between simulated and observed data
-        d <- get_d(params = theta_ss, data = Data) 
-      }
-    }
-    theta[, part_i, i] <- theta_ss # store result
+I <- 3 # intialize iter
+# sample posterior
+for (i in (I-1):num_posts) { 
+  theta_1 <- rproposal(theta[, i-1], sigma_proposal) # sample from proposal
+  
+  # get difference between simulated data and 
+  # observed for this set of parameters
+  d_new <- get_d(theta_1, Data) 
+  if(d_new <= eps){
     
-    # log(pi/sum(w*dens))
-    log_weight[part_i, i] <- 
-      log(
-        dens_prior(theta[, part_i, i], LOG = F) / 
-          sum(dnorm(theta[,, i-1], 
-                    theta[, part_i, i], 
-                    sqrt(sigma2_vec[, i-1]), 
-                    log = F) %*% 
-                exp(matrix(log_weight[, i-1], ncol = 1)), na.rm = T)
-      )
+    # determine weight based on prior and other candidate
+    new_weight <- dens_prior(theta_1, LOG = T) + 
+      log_dens_proposal(theta[, i-1], theta_1)
+    old_weight <- dens_prior(theta[, i-1], LOG = T) + 
+      log_dens_proposal(theta_1, theta[, i-1])
+    
+    # preform MH step
+    MH <- mh_step(new_weight = new_weight, old_weight = old_weight)
+    if(MH == "accept"){
+      theta[, i] <- theta_1 # store the accepted value  
+    }else{
+      theta[, i] <- theta[, i-1] # store the previous value
+    }
+  }else{
+    theta[, i] <- theta[, i-1] # store the previous value
   }
-  # calculate variation in population
-  sigma2_vec[, i] <- 2 * apply(theta[,, i], 1, var) 
+  print(i)
 }
-I <- i-1 # store i
+I <- i # record where you leave off if interrupting
 
-load("PMC_chains.Rdata") # save work
+# load("chains.RData") # save work
 
 # --------------------------------------------- prior/posterior density plots
 
 # Extract posteriors for each param
-alpha <- theta[1,,]
-beta <- theta[2,,]
-mu <- theta[3,,]
-sigma <- theta[4,,]
-lambda <- theta[5,,]
+alpha <- theta[1,]
+beta <- theta[2,]
+mu <- theta[3,]
+sigma <- theta[4,]
+lambda <- theta[5,]
 # ground truth
 theta <- c(.0075,.01,350,50,100)
 
+
 # make plots
-png("../PMC_alpha.png",3300,1100)
+png("../reject_alpha.png",3300,1100)
 par(mfrow=c(1,3),cex=2.5)
 cs.alpha <- quantile(alpha,c(0,.025,.975,1))
 range.alpha <- alpha.y[2]-alpha.y[1]
@@ -156,7 +137,7 @@ x <- seq(lambda.x[1], lambda.x[2], by = .001)
 lines(x, dnorm(x, prior_list$lambda$mu[1], prior_list$lambda$mu[2]))
 dev.off()
 
-png("../PMC_mu.png",2200,1100)
+png("../reject_mu.png",2200,1100)
 par(mfrow=c(1,2),cex=2.5)
 
 cs.mu <- quantile(mu,c(0,.025,.975,1))

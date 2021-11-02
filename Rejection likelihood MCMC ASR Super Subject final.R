@@ -10,7 +10,7 @@ library("brms") # Probability density functions
 # Transform parameters to/from normal or ASR param space
 source("transformations_for_asr.R")
 source("priors_asr.R") # priors for ASR model
-
+source("limits.r") # for plotting
 
 # ------------------------------------------------------------- Import Data
 Data <- read_table2("Conflict_Data_2.0 (1).txt",
@@ -93,8 +93,8 @@ log_post <- function(theta, data) {
   return(out)
 }
 
-
-
+# ------------------------------------------------------------- Initialize
+theta_init <- mu_mean_vec # Initial starting point (at mean of prior)
 
 # ------------------------------------------------------------- Sample
 mcmc <- 100000 # number of mcmc draws
@@ -113,20 +113,63 @@ out <- MCMCmetrop1R(
   verbose = T
 )
 
-# Sample plots
-plot(out)
+# --------------------------------------------- prior/posterior density plots
 
-# Chains
-ts.plot(exp(out[1:mcmc, 1]))
-ts.plot(exp(out[1:mcmc, 2]))
-ts.plot(exp(out[1:mcmc, 3]))
-ts.plot(exp(out[1:mcmc, 4]))
-ts.plot(exp(out[1:mcmc, 5]))
 
-# means
-post_mean <- apply(out, 2, function(x) mean(exp(x)))
-names(post_mean) <- param_names
-post_mean
+# Extract posteriors for each param
+alpha <- out[,1]
+beta <- out[,2]
+mu <- out[,3]
+sigma <- out[,4]
+lambda <- out[,5]
+# ground truth
+theta <- c(.0075,.01,350,50,100)
 
-# joint distributions
-psych::pairs.panels(out %>% as.matrix())
+# make plots
+png("../MCMC_alpha.png",3300,1100)
+par(mfrow=c(1,3),cex=2.5)
+cs.alpha <- quantile(alpha,c(0,.025,.975,1))
+range.alpha <- alpha.y[2]-alpha.y[1]
+plot(density(alpha),xlim=alpha.x,ylim=alpha.y,
+     xlab="Log Alpha",lwd=3,cex=1.5,main='',ylab="")
+lines(rep(log(1/theta[1]),2),alpha.y,lty=3)
+lines(cs.alpha[2:3],rep(-.005*range.alpha,2),lwd=5)
+abline(h=1,lwd=1)
+
+cs.beta <- quantile(beta,c(0,.025,.975,1))
+range.beta <- beta.y[2]-beta.y[1]
+plot(density(beta),xlim=beta.x,ylim=beta.y,
+     xlab="Log Beta",lwd=3,cex=1.5,main='',ylab="")
+lines(rep(log(1/theta[2]),2),beta.y,lty=3)
+lines(cs.beta[2:3],rep(-.005*range.beta,2),lwd=5)
+abline(h=1,lwd=1)
+
+cs.lambda <- quantile(lambda,c(0,.025,.975,1))
+range.lambda <- lambda.y[2]-lambda.y[1]
+plot(density(lambda),xlim=lambda.x,ylim=lambda.y,
+     xlab="Log Lambda",lwd=3,cex=1.5,main='',ylab="")
+lines(rep(log(theta[5]),2),lambda.y,lty=3)
+lines(cs.lambda[2:3],rep(-.005*range.lambda,2),lwd=5)
+abline(h=1,lwd=1)
+dev.off()
+
+png("../MCMC_mu.png",2200,1100)
+par(mfrow=c(1,2),cex=2.5)
+
+cs.mu <- quantile(mu,c(0,.025,.975,1))
+range.mu <- mu.y[2]-mu.y[1]
+plot(density(mu),xlim=mu.x,ylim=mu.y,
+     xlab="Log Mu",lwd=3,cex=1.5,main='',ylab="")
+lines(rep(log(theta[3]),2),mu.y,lty=3)
+lines(cs.mu[2:3],rep(-.005*range.mu,2),lwd=5)
+abline(h=1,lwd=1)
+
+cs.sigma <- quantile(sigma,c(0,.025,.975,1))
+range.sigma <- sigma.y[2]-sigma.y[1]
+plot(density(sigma),xlim=sigma.x,ylim=sigma.y,
+     xlab="Log Sigma",lwd=3,cex=1.5,main='',ylab="")
+lines(rep(log(theta[4]),2),sigma.y,lty=3)
+lines(cs.sigma[2:3],rep(-.005*range.sigma,2),lwd=5)
+abline(h=1,lwd=1)
+dev.off()
+
